@@ -324,8 +324,14 @@ private:
 			const usize index = contact.index.value();
 
 			// Ignore unstable changes
-			if (!contact.stable.value_or(true))
+			if (!contact.stable.value_or(true)) {
+				// An unstable measurement is not a contact lift. Preserve the
+				// selected singletouch state until the contact is stable again.
+				if (m_single_index == index && contact.valid.value_or(true))
+					reset_singletouch = false;
+
 				continue;
+			}
 
 			// Check if the contact is too far outside of the screen.
 			bool lift = !contact.valid.value_or(true);
