@@ -54,6 +54,12 @@ public:
 			spdlog::warn("Stylus is disabled!");
 	}
 
+	void on_stop() override
+	{
+		if (m_touch.has_value())
+			m_touch->disable();
+	}
+
 	void on_touch(const std::vector<contacts::Contact<f64>> &contacts) override
 	{
 		if (!m_touch.has_value())
