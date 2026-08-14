@@ -1,58 +1,100 @@
 # IPTSD
 
-> **This is a personal fork of [linux-surface/iptsd](https://github.com/linux-surface/iptsd)**,
-> **vibe coded** (you have been warned) to get my MS Surface Laptop 7 Intel haptic trackpad to work. It tracks the upstream project and adds a small set of patches not yet
-> merged upstream. See [Changes from upstream](#changes-from-upstream) below.
+This repository is a downstream fork of the userspace touch processing daemon
+for Microsoft Surface devices using Intel Precise Touch technology. Its lineage
+is:
 
-This is the userspace touch processing daemon for Microsoft Surface devices using Intel Precise
-Touch technology.
+```text
+linux-surface/iptsd
+  -> alex-lentz/iptsd
+  -> validated base commit 3663e96e758145801c3cb1ce7c72f362d0d4a5f5
+  -> andreasbjorshol/iptsd
+  -> sl7-0c77-fixes
+```
 
-The daemon will read incoming HID reports containing raw capacitive touch data, stylus coordinates
-and DFT pen measurements, and create standard input events from it using uinput devices.
+The daemon reads HID reports containing raw capacitive touch data, stylus
+coordinates, and DFT pen measurements, then creates standard input events using
+uinput devices.
 
-### Changes from upstream
+## Downstream changes
 
-The following patches are applied on top of [v3.1.0](https://github.com/linux-surface/iptsd/releases/tag/v3.1.0):
+The validated base includes Alex Lentz's work on the Surface Laptop 7 Intel
+haptic touchpad, on top of the upstream linux-surface project:
 
-- **Fix physical click on Sensel haptic touchpad** (`ipts/parser`, `daemon`) — Parses IPTS report
-  frame type `0x94`, which carries touchpad button state on devices like the Surface Laptop 7
-  Intel. Bit 1 of byte 2 signals a physical button press; this is now routed through the existing
+- **Physical click on Sensel haptic touchpads** — Parses IPTS report frame type
+  `0x94`, which carries touchpad button state on devices such as the Surface
+  Laptop 7 Intel, and routes the physical button state through the existing
   `on_button` path so `BTN_LEFT` is emitted correctly.
+- **Recovery after sleep when a hidraw device persists** — Adds a
+  `systemd-sleep` hook that re-fires udev `add` events for hidraw devices after
+  resume, and retries `iptsd@.service` after transient startup failures.
 
-- **Fix iptsd not recovering after sleep when hidraw device persists** (`etc`) — Adds a
-  `systemd-sleep` hook that re-fires udev `add` events for all hidraw devices on post-resume. On
-  some Surface devices the hidraw node is not removed during suspend, so no udev `ACTION=="add"`
-  event fires on wake and `iptsd@.service` is never restarted. The hook works around this by
-  running `udevadm trigger` after resume. Also adds `Restart=on-failure` to the service unit so
-  that a transient startup failure immediately after wake is retried automatically.
+Branch `sl7-0c77-fixes` adds exactly two further lifecycle fixes for the
+Snapdragon Surface Laptop 7 configuration:
 
-### Credits
+- **Preserve singletouch state across unstable frames** — A selected, valid
+  contact reported with `stable=false` is treated as an unstable measurement,
+  not as a physical lift. This prevents premature `BTN_LEFT` release during
+  physical click-and-drag.
+- **Release touch state on daemon shutdown** — `Daemon::on_stop()` calls
+  `TouchDevice::disable()` so touch and button state are explicitly released
+  before the uinput device is destroyed.
 
-IPTSD is developed and maintained by the [linux-surface](https://github.com/linux-surface) team,
-primarily [Maximilian Luz](https://github.com/quo) and [Dorian Stoll](https://github.com/StollD).
-All core functionality originates from the upstream project. The patches in this fork were authored
-by Alex Lentz with assistance from [Claude](https://claude.ai).
+The detector, tracker, stabilizer, palm detection, and button debounce behavior
+are unchanged and are not part of these patches. The detailed technical
+explanation is in [docs/sl7-touchpad-fixes.md](docs/sl7-touchpad-fixes.md).
 
-### Installing
+These downstream changes are not part of upstream
+[linux-surface/iptsd](https://github.com/linux-surface/iptsd).
 
-This fork's patches are **not** part of the linux-surface package repository, so installing IPTSD
-through the normal linux-surface packages will get you upstream IPTSD without the fixes described
-above.
+### Target hardware and validation
 
-There's no prebuilt package for this fork, and its GitHub Actions workflow (inherited from
-upstream) depends on linux-surface's release/signing secrets, which this fork doesn't have — so
-CI here doesn't produce installable artifacts. The supported way to use this fork is to build it
-from source; see [Building](#building) below.
+The additional fixes target the physically validated:
 
-If you don't need these patches, use
-[upstream linux-surface/iptsd](https://github.com/linux-surface/iptsd#installing) and its official
-packages instead.
+- Microsoft Surface Laptop 7 13.8"
+- Snapdragon X Elite / X1E80100
+- ARM64 Linux
+- Touchpad VID:PID `045E:0C77`
 
-**Important:** Support on Debian based distributions only goes back to Debian 11 / Ubuntu 22.04.
+Physical validation results:
 
-### Building
+- pointer: PASS
+- physical click: PASS
+- drag-and-drop: PASS
+- long-held drag: PASS
+- direction changes while dragging: PASS
+- two-finger scrolling: PASS
+- clean daemon shutdown: PASS
+- touchpad click after daemon replacement: PASS
+- external mouse click after daemon replacement: PASS
 
-To build IPTSD from source, you need to install the following dependencies:
+## Credits
+
+IPTSD is developed and maintained by the
+[linux-surface](https://github.com/linux-surface) team, primarily
+[Maximilian Luz](https://github.com/quo) and
+[Dorian Stoll](https://github.com/StollD). All core functionality originates
+from the upstream project. The inherited Surface Laptop 7 Intel patches were
+authored by Alex Lentz with assistance from [Claude](https://claude.ai).
+
+## Installing
+
+The downstream patches in this repository are not part of the linux-surface
+package repository. Installing IPTSD through the normal linux-surface packages
+will therefore install upstream IPTSD without these changes.
+
+This fork does not publish prebuilt packages or add installation automation.
+For the Snapdragon Surface Laptop 7 configuration, build and run the standalone
+binary as described below. If these downstream changes are not needed, use
+[upstream linux-surface/iptsd](https://github.com/linux-surface/iptsd#installing)
+and its official packages instead.
+
+**Important:** Support on Debian-based distributions only goes back to Debian 11
+/ Ubuntu 22.04.
+
+## Building
+
+To build IPTSD from source, you need:
 
  * A C++ compiler
  * meson
@@ -63,51 +105,28 @@ To build IPTSD from source, you need to install the following dependencies:
  * inih / INIReader
  * gsl
  * spdlog
- * cmake, because some of our dependencies don't ship pkgconfig files
+ * cmake, because some dependencies do not ship pkgconfig files
 
-To build the plotting tools for visualizing data, you need to install a few more dependencies.
+To build the plotting tools for visualizing data, you also need cairomm and
+SDL2. Most dependencies can be downloaded and included automatically by meson
+if they are not provided by the distribution.
 
- * cairomm
- * SDL2
-
-Most of the dependencies can be downloaded and included automatically by meson, should your
-distribution not include them.
+Clone this downstream repository and select the validated branch:
 
 ```bash
-$ git clone https://github.com/alex-lentz/iptsd
-$ cd iptsd
-$ meson setup build
-$ ninja -C build
+git clone https://github.com/andreasbjorshol/iptsd.git
+cd iptsd
+git switch sl7-0c77-fixes
+meson setup build
+ninja -C build src/iptsd
 ```
 
-To run iptsd, you need to determine the ID of the hidraw device of your touchscreen:
+For the validated Surface Laptop 7 configuration, run the standalone daemon
+with the Chromium HID-over-SPI touchpad device:
 
 ```bash
-$ sudo ./etc/iptsd-find-hidraw
+sudo ./build/src/iptsd /dev/surface-touchpad
 ```
 
-You can then run iptsd with the device path as a launch argument:
-
-```bash
-$ sudo ./build/src/iptsd /dev/hidrawN
-```
-
-Alternatively, you can install the files you just built to the system. After a reboot, iptsd will
-get started by udev automatically:
-
-```bash
-$ sudo ninja -C build install
-```
-
-On Fedora (or any other SELinux enabled distribution) you also need to fix the SELinux contexts:
-
-```bash
-$ sudo semanage fcontext -a -t systemd_unit_file_t -s system_u /usr/lib/systemd/system/iptsd@.service
-$ sudo semanage fcontext -a -t usr_t -s system_u '/usr/local/bin/ipts.*'
-
-$ sudo restorecon -vF /usr/lib/systemd/system/iptsd@.service
-$ sudo restorecon -vF /usr/local/bin/ipts*
-```
-
-This is only necessary when using `ninja install`. When you build your own package, everything
-will just work.
+This workflow does not install the binary over `/usr/local/bin/iptsd` or modify
+the system configuration.
